@@ -63,33 +63,21 @@ public class GamePanel extends JPanel {
      */
     @Override
     protected void paintComponent(Graphics g) {
-        // Llama primero al método de la superclase (JPanel) para limpiar el fondo, etc.
         super.paintComponent(g);
-
-        // Obtiene el estado actual para dibujar. Es importante usar una referencia local
-        // dentro de este método, ya que 'currentState' podría ser modificado por otro hilo
-        // mientras este método se ejecuta (aunque 'volatile' ayuda con la visibilidad).
         GameState state = this.currentState;
 
-        // Si no hay estado todavía, no dibuja nada más.
         if (state == null) {
-            // Podríamos dibujar un mensaje de "Conectando..." o similar aquí.
             g.setColor(Color.WHITE);
-            g.setFont(STATUS_FONT);
+            g.setFont(STATUS_FONT); // Ensure STATUS_FONT is defined
             g.drawString("Esperando conexión...", ANCHO_JUEGO / 2 - 150, ALTO_JUEGO / 2);
             return;
         }
 
         // --- Dibuja los Elementos del Juego ---
-        // Dibuja a todos los jugadores activos.
-        // Usamos una copia sincronizada si tememos ConcurrentModificationException,
-        // aunque si el estado se actualiza como un todo, podría no ser estrictamente necesario.
-        // Sin embargo, es más seguro.
         List<Player> players = state.getPlayers();
         if (players != null) {
-            // Creamos una copia segura para iterar
             List<Player> safePlayers = Collections.synchronizedList(new ArrayList<>(players));
-            synchronized (safePlayers) { // Sincronizamos la iteración
+            synchronized (safePlayers) {
                  for (Player player : safePlayers) {
                     if (player != null && player.isActive()) {
                         player.draw(g);
@@ -98,8 +86,6 @@ public class GamePanel extends JPanel {
             }
         }
 
-
-        // Dibuja todos los aliens activos.
         List<Alien> aliens = state.getAliens();
          if (aliens != null) {
             List<Alien> safeAliens = Collections.synchronizedList(new ArrayList<>(aliens));
@@ -112,7 +98,13 @@ public class GamePanel extends JPanel {
              }
          }
 
-        // Dibuja todas las balas activas.
+        // --- Draw Boss ---
+        Boss boss = state.getBoss();
+        if (boss != null && boss.isActive()) {
+            boss.draw(g); // The Boss class's draw method handles drawing the boss and health bar
+        }
+        // --- End Draw Boss ---
+
          List<Bullet> bullets = state.getBullets();
          if (bullets != null) {
              List<Bullet> safeBullets = Collections.synchronizedList(new ArrayList<>(bullets));
@@ -125,13 +117,11 @@ public class GamePanel extends JPanel {
              }
          }
 
-        // --- Dibuja Información Adicional (Puntuaciones, Nivel, Mensajes) ---
-        drawScores(g, state.getScores(), state.getPlayers()); // Pasa la lista de jugadores para obtener colores
+        drawScores(g, state.getScores(), state.getPlayers());
         drawGameInfo(g, state.getLevel(), state.getStatusMessage());
 
-        // Dibuja mensaje de Game Over si aplica.
         if (state.isGameOver()) {
-            drawGameOver(g);
+            drawGameOver(g); // Ensure drawGameOver is defined
         }
     }
 
