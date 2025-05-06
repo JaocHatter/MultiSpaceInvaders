@@ -59,7 +59,7 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
     private JButton startButton;       // Botón para iniciar/detener el servidor
     private JTextArea logArea;         // Área para mostrar logs y mensajes
     private GamePanel gamePanel;       // Panel para visualizar el estado del juego (como un cliente)
-
+ /// asdasdsad
     // --- Constructor ---
     /**
      * Constructor del Servidor. Inicializa la GUI.
