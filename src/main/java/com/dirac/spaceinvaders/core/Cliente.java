@@ -3,18 +3,16 @@ package com.dirac.spaceinvaders.core;
 import com.dirac.spaceinvaders.game.GamePanel;   // Panel de dibujo
 import com.dirac.spaceinvaders.game.GameState;  // Objeto de estado
 import com.dirac.spaceinvaders.net.MessageAction; // Acciones a enviar
-import javax.swing.Timer;  // Necesario para movimiento continuo
-
-import javax.swing.*; // GUI
-import java.awt.*;    // Layouts, Dimension, etc.
-import java.awt.event.*; // Listeners (ActionListener, KeyAdapter)
-import java.io.IOException; // Excepciones de red
-import java.io.ObjectInputStream; // Leer estado del servidor
-import java.io.ObjectOutputStream; // Enviar acciones al servidor
-import java.net.ConnectException; // Error específico de conexión
-import java.net.Socket;           // Socket del cliente
-import java.net.SocketException;  // Error de socket
-import java.net.UnknownHostException; // Host no encontrado
+import java.awt.*; // GUI
+import java.awt.event.*;    // Layouts, Dimension, etc.
+import java.io.IOException; // Listeners (ActionListener, KeyAdapter)
+import java.io.ObjectInputStream; // Excepciones de red
+import java.io.ObjectOutputStream; // Leer estado del servidor
+import java.net.ConnectException; // Enviar acciones al servidor
+import java.net.Socket; // Error específico de conexión
+import java.net.SocketException;           // Socket del cliente
+import java.net.UnknownHostException;  // Error de socket
+import javax.swing.*; // Host no encontrado
 
 /**
  * Clase Cliente: Representa la aplicación cliente que se conecta al servidor
@@ -40,6 +38,7 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
     private JFrame clientFrame;    // Ventana principal
     private JTextField ipField;      // Campo para IP del servidor
     private JTextField portField;    // Campo para Puerto del servidor
+    private JTextField nameField;  // Campo para nombre de jugador
     private JButton connectButton;  // Botón Conectar/Desconectar
     private GamePanel gamePanel;    // Panel donde se dibuja el juego
     // Podríamos añadir botones para controles como en el PDF, pero KeyListener es más común para juegos
@@ -92,6 +91,9 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
         topPanel.add(new JLabel("Puerto:"));
         portField = new JTextField(String.valueOf(DEFAULT_SERVER_PORT), 5);
         topPanel.add(portField);
+        topPanel.add(new JLabel("Nombre:"));
+        nameField = new JTextField(10);
+        topPanel.add(nameField);
         connectButton = new JButton("Conectar");
         connectButton.addActionListener(e -> toggleConnection());
         topPanel.add(connectButton);
@@ -161,7 +163,8 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
                         if (idMessage instanceof String && ((String)idMessage).startsWith("ID:")) {
                              try {
                                 myPlayerId = Integer.parseInt(((String)idMessage).substring(3));
-                                clientFrame.setTitle("Cliente Space Invaders - Jugador " + myPlayerId); // Actualiza título ventana
+                                String namePlayer = nameField.getText();
+                                clientFrame.setTitle("Cliente Space Invaders - Jugador " + namePlayer); // Actualiza título ventana
                                 setStatus("Conectado como Jugador " + myPlayerId);
                              } catch (NumberFormatException nfe) {
                                  System.err.println("Error parseando ID del servidor: " + idMessage);
