@@ -825,6 +825,33 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         }
     }
 
+    private void showFinalScoresTable() {
+        // Preparamos datos ordenados por puntuación descendente
+        List<Map.Entry<Integer,Integer>> list = new ArrayList<>(finalScores.entrySet());
+        list.sort((a,b) -> b.getValue() - a.getValue());
+
+        // Columnas y datos
+        String[] columnNames = { "Jugador", "Puntuación" };
+        Object[][] tableData = new Object[list.size()][2];
+        for (int i = 0; i < list.size(); i++) {
+            tableData[i][0] = "Jugador " + list.get(i).getKey();
+            tableData[i][1] = list.get(i).getValue();
+        }
+
+        // Crear JTable
+        JTable table = new JTable(tableData, columnNames);
+        table.setEnabled(false);
+        JScrollPane scrollPane = new JScrollPane(table);
+        table.setFillsViewportHeight(true);
+
+        // Mostrar en un diálogo
+        JOptionPane.showMessageDialog(
+                serverFrame,
+                scrollPane,
+                "Puntuaciones Finales",
+                JOptionPane.INFORMATION_MESSAGE
+        );
+    }
     /**
      * Comprueba si se cumplen las condiciones para terminar el juego.
      * Llamado repetidamente desde el bucle principal del juego (run).
