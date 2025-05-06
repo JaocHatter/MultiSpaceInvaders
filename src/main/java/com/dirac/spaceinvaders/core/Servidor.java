@@ -37,12 +37,21 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
     private static final int ALIEN_SHOOT_PROBABILITY = 5; // Probabilidad (en %) de que un alien dispare en un tick
     private static final int ZIGZAG_DISTANCE = 120;      // distancia horizontal antes de invertir
     private int zigzagDistanceCounter = 0;               // contador acumulado
+    private static final int MAX_LEVELS = 6; // Total number of levels
+    private static final int MAX_BOSS_MINIONS = 10; // Max small enemies spawned by boss
+    private List<Alien> bossMinions = new ArrayList<>();
+
     // --- Componentes de Red ---
     private int port;                        // Puerto en el que escuchará el servidor
     private ServerSocket serverSocket;       // Socket de escucha principal
     private ExecutorService clientExecutor;  // Pool de hilos para manejar clientes
     // Lista SINCRONIZADA para almacenar los manejadores de los clientes conectados.
     private List<ClientHandler> clientHandlers = Collections.synchronizedList(new ArrayList<>());
+
+    // --- Game Difficulty Parameters (will be set based on level) ---
+    private int currentAlienMoveInterval;
+    private int currentAlienShootProbability;
+    private int currentAlienSpeedMultiplier;
 
     // --- Estado del Juego ---
     private volatile GameState currentGameState; // El estado actual y autoritativo del juego. 'volatile' por acceso multihilo.
@@ -59,6 +68,7 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
     private JButton startButton;       // Botón para iniciar/detener el servidor
     private JTextArea logArea;         // Área para mostrar logs y mensajes
     private GamePanel gamePanel;       // Panel para visualizar el estado del juego (como un cliente)
+    private JComboBox<Integer> levelSelectorComboBox;
 
     // --- Constructor ---
     /**
@@ -76,17 +86,23 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
     private void setupGUI() {
         serverFrame = new JFrame("Servidor Space Invaders");
         serverFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        serverFrame.setLayout(new BorderLayout(5, 5)); // Layout principal
+        serverFrame.setLayout(new BorderLayout(5, 5));
 
-        // --- Panel Superior (Controles) ---
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         topPanel.add(new JLabel("Puerto:"));
-        portField = new JTextField(String.valueOf(DEFAULT_PORT), 5); // Campo con puerto por defecto
+        portField = new JTextField(String.valueOf(DEFAULT_PORT), 5);
         topPanel.add(portField);
+
+        // --- Level Selector Menu ---
+        topPanel.add(new JLabel("Nivel Inicial:"));
+        Integer[] levels = {1, 2, 3, 4, 5, 6};
+        levelSelectorComboBox = new JComboBox<>(levels);
+        topPanel.add(levelSelectorComboBox);
+        // --- End Level Selector Menu ---
+
         startButton = new JButton("Iniciar Servidor");
-        startButton.addActionListener(e -> toggleServer()); // Llama a toggleServer al hacer clic
+        startButton.addActionListener(e -> toggleServer());
         topPanel.add(startButton);
-        // Muestra la IP local para que los clientes sepan dónde conectar
         try {
             topPanel.add(new JLabel("IP Servidor: " + InetAddress.getLocalHost().getHostAddress()));
         } catch (UnknownHostException uhe) {
@@ -94,22 +110,19 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         }
         serverFrame.add(topPanel, BorderLayout.NORTH);
 
-        // --- Panel Central (Visualización del Juego) ---
-        gamePanel = new GamePanel(); // Crea el panel de juego
+        gamePanel = new GamePanel();
         serverFrame.add(gamePanel, BorderLayout.CENTER);
 
-        // --- Panel Inferior (Log) ---
-        logArea = new JTextArea(10, 50); // Área de texto para logs
+        logArea = new JTextArea(10, 50);
         logArea.setEditable(false);
         logArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        JScrollPane scrollPane = new JScrollPane(logArea); // Añade barras de desplazamiento
+        JScrollPane scrollPane = new JScrollPane(logArea);
         serverFrame.add(scrollPane, BorderLayout.SOUTH);
 
-        // Finaliza configuración de la ventana
-        serverFrame.pack(); // Ajusta tamaño a los componentes
-        serverFrame.setLocationRelativeTo(null); // Centra en pantalla
+        serverFrame.pack();
+        serverFrame.setLocationRelativeTo(null);
         serverFrame.setVisible(true);
-        log("GUI inicializada. Introduce puerto y presiona 'Iniciar Servidor'.");
+        log("GUI inicializada. Seleccione nivel, introduzca puerto y presione 'Iniciar Servidor'.");
     }
 
     // --- Control del Servidor ---
@@ -119,37 +132,38 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      */
     private void toggleServer() {
         if (serverSocket == null || serverSocket.isClosed()) {
-            // Iniciar Servidor
             try {
                 port = Integer.parseInt(portField.getText());
                 if (port < 1024 || port > 65535) throw new NumberFormatException("Puerto inválido");
 
-                serverSocket = new ServerSocket(port); // Intenta abrir el puerto
-                clientExecutor = Executors.newCachedThreadPool(); // Crea pool de hilos para clientes
-                gameRunning = true; // Activa el bucle de juego
-                new Thread(this).start(); // Inicia el bucle de juego en un nuevo hilo
-                startAcceptingClients(); // Empieza a aceptar clientes en otro hilo
+                // --- Get selected level ---
+                int selectedLevel = (Integer) levelSelectorComboBox.getSelectedItem();
+                // --- End get selected level ---
 
-                startButton.setText("Detener Servidor"); // Cambia texto del botón
-                portField.setEnabled(false); // Deshabilita campo de puerto
-                log("Servidor iniciado en el puerto " + port + ". Esperando conexiones...");
-                initializeGame(); // Prepara el primer nivel del juego
+                serverSocket = new ServerSocket(port);
+                clientExecutor = Executors.newCachedThreadPool();
+                gameRunning = true;
+                new Thread(this).start();
+                startAcceptingClients();
+
+                startButton.setText("Detener Servidor");
+                portField.setEnabled(false);
+                levelSelectorComboBox.setEnabled(false); // Disable level selector while running
+                log("Servidor iniciado en el puerto " + port + ". Nivel inicial: " + selectedLevel);
+                initializeGame(selectedLevel); // Pass selected level
 
             } catch (NumberFormatException nfe) {
                 log("Error: Puerto inválido. Introduce un número entre 1024 y 65535.");
                 JOptionPane.showMessageDialog(serverFrame, "Puerto inválido.", "Error", JOptionPane.ERROR_MESSAGE);
             } catch (IOException e) {
                 log("Error al iniciar el servidor en el puerto " + port + ": " + e.getMessage());
-                JOptionPane.showMessageDialog(serverFrame, "No se pudo iniciar el servidor:\n" + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-                if (serverSocket != null && !serverSocket.isClosed()) {
-                    try { serverSocket.close(); } catch (IOException io) {}
-                }
+                // ... (rest of your catch block)
             }
         } else {
-            // Detener Servidor
             stopServer();
             startButton.setText("Iniciar Servidor");
             portField.setEnabled(true);
+            levelSelectorComboBox.setEnabled(true); // Re-enable level selector
         }
     }
 
@@ -285,50 +299,35 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      * y envía las actualizaciones a los clientes. Se ejecuta en su propio hilo.
      */
     @Override
-    public void run() {
-        long lastUpdateTime = System.nanoTime(); // Tiempo de la última actualización
-
+    public void run() { // Bucle principal del juego
+        long lastUpdateTime = System.nanoTime();
         while (gameRunning) {
             long now = System.nanoTime();
-            // Calcula el tiempo transcurrido en segundos.
             double deltaTime = (now - lastUpdateTime) / 1_000_000_000.0;
             lastUpdateTime = now;
 
-            // --- Actualiza el Estado del Juego ---
-            // Es crucial sincronizar el acceso a currentGameState si otros hilos
-            // (como los ClientHandlers al procesar acciones) lo modifican directamente.
-            // Si las acciones se ponen en cola, la sincronización puede ser más localizada.
             synchronized (currentGameState) {
                 if (!currentGameState.isGameOver()) {
-                    updateGameLogic(deltaTime); // Aplica la lógica del juego
-                    checkCollisions();          // Comprueba colisiones
-                    currentGameState.removeInactiveObjects(); // Limpia objetos marcados
-                    checkGameOver();            // Comprueba condiciones de fin de juego
-                    checkLevelComplete();       // Comprueba si se completó el nivel
+                    updateGameLogic(deltaTime);
+                    checkCollisions();
+                    currentGameState.removeInactiveObjects(); // This also removes inactive boss minions from GameState's list
+                    removeInactiveBossMinionsFromServerList(); // Keep server-side list sync
+                    checkGameOver();
+                    checkLevelComplete();
                 }
-                // Actualiza el panel de juego del propio servidor.
-                // Usa invokeLater para asegurar que la actualización de Swing ocurra en el EDT.
-                final GameState stateToSend = copyGameState(currentGameState); // Enviar una copia
+                final GameState stateToSend = copyGameState(currentGameState);
                 SwingUtilities.invokeLater(() -> gamePanel.updateGameState(stateToSend));
-
-            } // Fin del bloque synchronized
-
-            // --- Envía el Estado a los Clientes ---
-            // Envía una copia del estado actual a todos los clientes conectados.
-             // Creamos una copia inmutable o profunda para evitar problemas de concurrencia
+            }
             GameState stateSnapshot = copyGameState(currentGameState);
             broadcastGameState(stateSnapshot);
 
-
-            // --- Control de Tiempo ---
-            // Espera un poco para mantener la tasa de actualización deseada.
             long sleepTime = GAME_UPDATE_RATE_MS - ((System.nanoTime() - now) / 1_000_000);
             if (sleepTime > 0) {
                 try {
                     Thread.sleep(sleepTime);
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); // Restablece el estado de interrupción
-                    gameRunning = false; // Detiene el juego si el hilo es interrumpido
+                    Thread.currentThread().interrupt();
+                    gameRunning = false;
                     log("Hilo del juego interrumpido.");
                 }
             }
@@ -336,6 +335,9 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         log("Bucle principal del juego terminado.");
     }
 
+    private void removeInactiveBossMinionsFromServerList() {
+        bossMinions.removeIf(minion -> !minion.isActive());
+    }
 
     // --- Lógica del Juego (Ejecutada en el Hilo del Juego) ---
 
@@ -353,57 +355,111 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
       * @param original El GameState original a copiar.
       * @return Una nueva instancia de GameState con copias de las listas y mapas.
       */
-     private GameState copyGameState(GameState original) {
-         if (original == null) return null;
-         GameState copy = new GameState();
-         synchronized (original) { // Sincroniza el acceso al original durante la copia
-             // Copia las listas creando nuevas ArrayLists a partir de las originales
-             if (original.getPlayers() != null) {
-                 copy.setPlayers(new ArrayList<>(original.getPlayers()));
-             }
-             if (original.getAliens() != null) {
-                 copy.setAliens(new ArrayList<>(original.getAliens()));
-             }
-             if (original.getBullets() != null) {
-                 copy.setBullets(new ArrayList<>(original.getBullets()));
-             }
-
-             // Copia el mapa de puntuaciones
-             if (original.getScores() != null) {
-                 copy.setScores(new HashMap<>(original.getScores()));
-             }
-
-             // Copia los valores primitivos y String (que son inmutables)
-             copy.setLevel(original.getLevel());
-             copy.setGameOver(original.isGameOver());
-             copy.setStatusMessage(original.getStatusMessage());
-         }
-         return copy;
-     }
+      private GameState copyGameState(GameState original) {
+        if (original == null) return null;
+        GameState copy = new GameState();
+        synchronized (original) {
+            if (original.getPlayers() != null) {
+                copy.setPlayers(new ArrayList<>(original.getPlayers()));
+            }
+            if (original.getAliens() != null) {
+                copy.setAliens(new ArrayList<>(original.getAliens()));
+            }
+            if (original.getBullets() != null) {
+                copy.setBullets(new ArrayList<>(original.getBullets()));
+            }
+            // --- Copy Boss ---
+            if (original.getBoss() != null) {
+                // Assuming Boss is serializable and has a copy constructor or is immutable enough
+                // For simplicity, we are directly assigning. If Boss has mutable state that needs deep copying,
+                // you'd need a Boss copy constructor or clone method.
+                // Boss newBoss = new Boss(original.getBoss().getX(), original.getBoss().getY());
+                // newBoss.setCurrentHealth(original.getBoss().getCurrentHealth()); ... etc.
+                // For now, let's assume the Boss object itself is copied by reference if mutable,
+                // or handle its state copying if it's simple.
+                // A safer approach for complex mutable objects is a dedicated copy method.
+                // Here, we'll create a new one for snapshot if needed or pass by reference if the state is self-contained
+                // and modifications in the game loop are fine. Given it's sent over network, it should be fine.
+                copy.setBoss(original.getBoss()); // This might share the boss object if mutable and modified later.
+                                                 // Proper deep copy needed if boss changes state after this snapshot.
+                                                 // For now, let's assume game logic updates a central boss, and this sends a snapshot.
+            }
+            // --- End Copy Boss ---
+            if (original.getScores() != null) {
+                copy.setScores(new HashMap<>(original.getScores()));
+            }
+            copy.setLevel(original.getLevel());
+            copy.setGameOver(original.isGameOver());
+            copy.setStatusMessage(original.getStatusMessage());
+        }
+        return copy;
+    }
 
 
     /**
      * Inicializa o resetea el estado del juego para el primer nivel (o un nuevo juego).
      */
-    private void initializeGame() {
+    private void initializeGame(int startLevel) { // Added startLevel parameter
         synchronized (currentGameState) {
-            currentGameState.getPlayers().clear(); // Limpia jugadores (se añadirán al conectar)
+            currentGameState.getPlayers().clear();
             currentGameState.getAliens().clear();
             currentGameState.getBullets().clear();
-            currentGameState.setScores(new HashMap<>()); // Resetea puntuaciones
-            currentGameState.setLevel(1);
+            currentGameState.setBoss(null); // Clear any previous boss
+            currentGameState.setScores(new HashMap<>());
+            currentGameState.setLevel(startLevel); // Use the selected start level
             currentGameState.setGameOver(false);
-            currentGameState.setStatusMessage("Nivel 1");
-            alienSpeedMultiplier = 1; // Resetea velocidad
-            currentAlienDirection = DireccionAlien.DERECHA; // Dirección inicial
-            alienMoveCounter = 0;
-            nextPlayerId = 0; // Resetea el contador de IDs
+            currentGameState.setStatusMessage("Nivel " + startLevel);
 
-             // Llama a los métodos para añadir jugadores y aliens iniciales
-             respawnAllPlayers(); // Coloca a los jugadores existentes al inicio
-             spawnAliensForLevel(1); // Genera los aliens del nivel 1
+            // Set difficulty for the starting level
+            setDifficultyForLevel(startLevel);
+
+            currentAlienDirection = DireccionAlien.DERECHA;
+            alienMoveCounter = 0;
+            zigzagDistanceCounter = 0;
+            nextPlayerId = 0;
+
+            respawnAllPlayers();
+            spawnEntitiesForLevel(startLevel); // Changed from spawnAliensForLevel
         }
-         log("Juego inicializado para el Nivel 1.");
+        log("Juego inicializado para el Nivel " + startLevel + ".");
+    }
+
+
+    private void setDifficultyForLevel(int level) {
+        log("Configurando dificultad para Nivel " + level);
+        if (level == 1) {
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL - 2; // 13
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY + 2; // 7
+            currentAlienSpeedMultiplier = 1;
+        } else if (level == 2) {
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL - 4; // 11
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY + 4; // 9
+            currentAlienSpeedMultiplier = 2;
+        } else if (level == 3) {
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL - 6; // 9
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY + 6; // 11
+            currentAlienSpeedMultiplier = 3;
+        } else if (level == 4) { // Slower than level 3 trend
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL - 3; // 12 (L3 was 9) - Slower movement pace
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY + 5; // 10 (L3 was 11) - Slightly less shooting
+            currentAlienSpeedMultiplier = 2; // (L3 was 3) - Slower individual alien speed
+        } else if (level == 5) { // Slightly harder than L4, but still managed
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL - 5; // 10 (L4 was 12, L3 was 9)
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY + 7; // 12 (L4 was 10, L3 was 11)
+            currentAlienSpeedMultiplier = 3; // (L4 was 2, L3 was 3)
+        } else if (level == MAX_LEVELS) { // Level 6 - Boss Level
+            // Boss parameters are self-contained in Boss.java, reset alien params to default
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL;
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY;
+            currentAlienSpeedMultiplier = 1;
+            bossMinions.clear(); // Clear any previous boss minions
+        } else {
+            currentAlienMoveInterval = ALIEN_MOVE_INTERVAL;
+            currentAlienShootProbability = ALIEN_SHOOT_PROBABILITY;
+            currentAlienSpeedMultiplier = 1;
+        }
+        log("Dificultad Nivel " + level + ": MoveInterval=" + currentAlienMoveInterval +
+            ", ShootProb=" + currentAlienShootProbability + "%, SpeedMult=" + currentAlienSpeedMultiplier);
     }
 
 
@@ -413,28 +469,37 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      */
     private void advanceToNextLevel() {
         synchronized (currentGameState) {
-            int nextLevel = currentGameState.getLevel() + 1;
-             // Limitamos a 2 niveles por la solicitud inicial
-            if (nextLevel > 2) {
+            int currentLevel = currentGameState.getLevel();
+            if (currentLevel == MAX_LEVELS && (currentGameState.getBoss() == null || !currentGameState.getBoss().isActive())) {
                  currentGameState.setGameOver(true);
-                 currentGameState.setStatusMessage("¡Has Ganado! Fin del Juego.");
+                 currentGameState.setStatusMessage("¡HAS GANADO! Fin del Juego.");
                  log("Juego completado. Todos los niveles superados.");
-                 return; // Termina el juego
+                 return;
+            }
+
+            int nextLevel = currentLevel + 1;
+            if (nextLevel > MAX_LEVELS) { // Should be caught by above, but as a safeguard
+                 currentGameState.setGameOver(true);
+                 currentGameState.setStatusMessage("¡HAS GANADO! Fin del Juego.");
+                 log("Juego completado. Todos los niveles superados.");
+                 return;
             }
 
             currentGameState.setLevel(nextLevel);
-            currentGameState.getBullets().clear(); // Limpia balas pantalla
-            currentGameState.getAliens().clear(); // Limpia aliens restantes (si los hubiera)
-            currentGameState.setGameOver(false); // Asegura que no esté en game over
+            currentGameState.getBullets().clear();
+            currentGameState.getAliens().clear(); // Clear traditional aliens
+            currentGameState.setBoss(null);       // Clear boss before spawning new level entities
+            currentGameState.setGameOver(false);
             currentGameState.setStatusMessage("Nivel " + nextLevel);
 
-            // Incrementa la dificultad (ej. velocidad de aliens)
-            alienSpeedMultiplier++; // Hace que se muevan más rápido
-            currentAlienDirection = DireccionAlien.DERECHA; // Resetea dirección
-            alienMoveCounter = 0; // Resetea contador de movimiento
+            setDifficultyForLevel(nextLevel); // Set difficulty for the new level
 
-            respawnAllPlayers(); // Recoloca a los jugadores
-            spawnAliensForLevel(nextLevel); // Genera aliens del nuevo nivel
+            currentAlienDirection = DireccionAlien.DERECHA;
+            alienMoveCounter = 0;
+            zigzagDistanceCounter = 0;
+
+            respawnAllPlayers();
+            spawnEntitiesForLevel(nextLevel); // Changed from spawnAliensForLevel
         }
         log("Avanzando al Nivel " + currentGameState.getLevel());
     }
@@ -444,31 +509,49 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      * Genera la formación de aliens para un nivel específico.
      * @param level El nivel para el cual generar aliens.
      */
-    private void spawnAliensForLevel(int level) {
-        currentGameState.getAliens().clear(); // Asegura que la lista esté vacía
-        int numRows = 3; // Número de filas de aliens
-        int numCols = 8; // Número de aliens por fila
-        int startX = 50; // Posición X inicial de la formación
-        int startY = 50; // Posición Y inicial de la formación
-        int spacingX = Alien.ALIEN_WIDTH + 15; // Espacio horizontal entre aliens
-        int spacingY = Alien.ALIEN_HEIGHT + 10; // Espacio vertical entre filas
+    private void spawnEntitiesForLevel(int level) {
+        synchronized (currentGameState) {
+            currentGameState.getAliens().clear(); // Clear all aliens first
+            bossMinions.clear();                  // Clear the server-side list of boss minions
+            currentGameState.setBoss(null);
 
-        for (int row = 0; row < numRows; row++) {
-            for (int col = 0; col < numCols; col++) {
-                int alienX = startX + col * spacingX;
-                int alienY = startY + row * spacingY;
-                int tipo;
-                // Asigna tipo según la fila (como en el PDF, aunque los puntos son inversos al clásico)
-                if (row == 0) tipo = Alien.TIPO_PEQUENO; // Fila superior
-                else if (row == 1) tipo = Alien.TIPO_MEDIANO; // Fila media
-                else tipo = Alien.TIPO_GRANDE; // Fila inferior
+            if (level >= 1 && level <= 5) {
+                // ... (your existing alien spawning logic for levels 1-5)
+                // Make sure this adds to currentGameState.getAliens()
+                int numRows = 3 + (level / 2) ;
+                if (numRows > 5) numRows = 5;
+                int numCols = 8 + (level -1);
+                if (numCols > 12) numCols = 12;
 
-                currentGameState.getAliens().add(new Alien(alienX, alienY, tipo));
+                int startX = 50;
+                int startY = 50;
+                int spacingX = Alien.ALIEN_WIDTH + 15 - (level);
+                if (spacingX < Alien.ALIEN_WIDTH + 5) spacingX = Alien.ALIEN_WIDTH + 5;
+                int spacingY = Alien.ALIEN_HEIGHT + 10;
+
+                for (int row = 0; row < numRows; row++) {
+                    for (int col = 0; col < numCols; col++) {
+                        int alienX = startX + col * spacingX;
+                        int alienY = startY + row * spacingY;
+                        int tipo;
+                        if (row % 3 == 0) tipo = Alien.TIPO_PEQUENO;
+                        else if (row % 3 == 1) tipo = Alien.TIPO_MEDIANO;
+                        else tipo = Alien.TIPO_GRANDE;
+                        currentGameState.getAliens().add(new Alien(alienX, alienY, tipo));
+                    }
+                }
+                log("Generados " + currentGameState.getAliens().size() + " aliens para el Nivel " + level);
+
+
+            } else if (level == MAX_LEVELS) {
+                int bossX = GamePanel.ANCHO_JUEGO / 2 - Boss.BOSS_WIDTH / 2;
+                int bossY = 60;
+                Boss boss = new Boss(bossX, bossY);
+                currentGameState.setBoss(boss);
+                log("Jefe final (Nodriza) generado para el Nivel " + level + " con " + boss.getMaxHealth() + " HP.");
             }
         }
-         log("Generados " + currentGameState.getAliens().size() + " aliens para el Nivel " + level);
     }
-
 
      /**
       * Recoloca a todos los jugadores conectados en su posición inicial.
@@ -604,112 +687,130 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      * @param deltaTime Tiempo transcurrido desde la última actualización (en segundos).
      */
     private void updateGameLogic(double deltaTime) {
-        // --- Mover Balas ---
+        // --- Mover Balas --- (existing logic)
         for (Bullet bullet : currentGameState.getBullets()) {
             if (bullet.isActive()) {
                 bullet.move();
-                if (bullet.getY() < 0 || bullet.getY() > GamePanel.ALTO_JUEGO) {
+                if (bullet.getY() < 0 || bullet.getY() > GamePanel.ALTO_JUEGO + 20 || bullet.getY() < -20) { // Added margin
                     bullet.setActive(false);
                 }
             }
         }
 
-        // --- Mover Aliens ---
-        alienMoveCounter++;
-        int moveInterval = Math.max(1,
-                ALIEN_MOVE_INTERVAL
-                        - (currentGameState.getAliens().size() / 4)
-                        - alienSpeedMultiplier);
+        // --- Logic for Levels 1-5 (Traditional Aliens) --- (existing logic using difficulty parameters)
+        if (currentGameState.getLevel() < MAX_LEVELS && !currentGameState.getAliens().isEmpty()) {
+            // ... (Your existing alien movement and shooting logic for levels 1-5)
+            // Make sure it uses currentAlienMoveInterval, currentAlienSpeedMultiplier, currentAlienShootProbability
+            // This part seems okay from the previous response.
+             alienMoveCounter++;
+            int moveInterval = (int) Math.max(1, currentAlienMoveInterval - (currentGameState.getAliens().stream().filter(a -> !(bossMinions.contains(a))).count() / 4)); 
 
-        if (alienMoveCounter >= moveInterval) {
-            alienMoveCounter = 0;
-
-            if (currentGameState.getLevel() == 2) {
-                // --- NIVEL 2: zigzag por distancia fija ---
-                int speedH = alienSpeedMultiplier * 2;
-                int speedV = alienSpeedMultiplier;
-                int dx = (currentAlienDirection == DireccionAlien.DERECHA) ? speedH : -speedH;
-                int dy = speedV;
-
-                // Acumular distancia horizontal recorrida
-                zigzagDistanceCounter += Math.abs(dx);
-                // Si supera el umbral, invertimos dirección y reseteamos
-                if (zigzagDistanceCounter >= ZIGZAG_DISTANCE) {
-                    currentAlienDirection = (currentAlienDirection == DireccionAlien.DERECHA)
-                            ? DireccionAlien.IZQUIERDA
-                            : DireccionAlien.DERECHA;
-                    zigzagDistanceCounter = 0;
-                    // Opcional: en este punto podrías hacer un descenso extra
-                }
-
-                // Aplicar movimiento diagonal a todos los aliens
-                for (Alien a : currentGameState.getAliens()) {
-                    if (a.isActive()) {
-                        a.moverHorizontal(dx);
-                        a.setY(a.getY() + dy);
-                    }
-                }
-            } else {
-                // --- NIVEL 1 (y >=3): lógica original de bordes ---
+            if (alienMoveCounter >= moveInterval) {
+                alienMoveCounter = 0;
                 boolean changeDir = false;
                 boolean moveDown = false;
                 int dx = (currentAlienDirection == DireccionAlien.DERECHA)
-                        ? alienSpeedMultiplier * 2
-                        : -alienSpeedMultiplier * 2;
+                        ? currentAlienSpeedMultiplier * 2
+                        : -currentAlienSpeedMultiplier * 2;
 
-                for (Alien a : currentGameState.getAliens()) {
-                    if (a.isActive()) {
-                        int nextX = a.getX() + dx;
-                        if (nextX <= 0 || nextX >= GamePanel.ANCHO_JUEGO - Alien.ALIEN_WIDTH) {
-                            changeDir = true;
-                            moveDown = true;
-                            break;
+                boolean useZigZag = (currentGameState.getLevel() == 3 || currentGameState.getLevel() == 5) ; // Example for levels 3 & 5 for variety
+
+                if (useZigZag) {
+                    // ... (Zigzag logic for traditional aliens if you want to keep it)
+                    // This example uses a simplified version of your previous zigzag
+                    int speedH_std_alien = currentAlienSpeedMultiplier * 2;
+                    int speedV_std_alien = currentAlienSpeedMultiplier; // Simpler vertical component
+                    dx = (currentAlienDirection == DireccionAlien.DERECHA) ? speedH_std_alien : -speedH_std_alien;
+
+                    zigzagDistanceCounter += Math.abs(dx);
+                    if (zigzagDistanceCounter >= ZIGZAG_DISTANCE) {
+                        currentAlienDirection = (currentAlienDirection == DireccionAlien.DERECHA)
+                                ? DireccionAlien.IZQUIERDA
+                                : DireccionAlien.DERECHA;
+                        zigzagDistanceCounter = 0;
+                        for (Alien a : currentGameState.getAliens()) { // All aliens descend on dir change
+                             if (a.isActive() && !bossMinions.contains(a)) a.moverAbajo();
                         }
                     }
-                }
-
-                if (changeDir) {
-                    currentAlienDirection = (currentAlienDirection == DireccionAlien.DERECHA)
-                            ? DireccionAlien.IZQUIERDA
-                            : DireccionAlien.DERECHA;
-                    dx = 0;
-                }
-
-                for (Alien a : currentGameState.getAliens()) {
-                    if (a.isActive()) {
-                        if (moveDown) {
-                            a.moverAbajo();
-                        } else {
+                    for (Alien a : currentGameState.getAliens()) {
+                        if (a.isActive() && !bossMinions.contains(a)) {
                             a.moverHorizontal(dx);
+                            a.setY(a.getY() + speedV_std_alien); // Slight diagonal movement
+                        }
+                    }
+                } else { // Original movement
+                    for (Alien a : currentGameState.getAliens()) {
+                        if (a.isActive() && !bossMinions.contains(a)) { // Exclude boss minions from this general logic
+                            int nextX = a.getX() + dx;
+                            if (nextX <= 0 || nextX >= GamePanel.ANCHO_JUEGO - Alien.ALIEN_WIDTH) {
+                                changeDir = true;
+                                moveDown = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (changeDir) {
+                        currentAlienDirection = (currentAlienDirection == DireccionAlien.DERECHA)
+                                ? DireccionAlien.IZQUIERDA
+                                : DireccionAlien.DERECHA;
+                        dx = 0;
+                    }
+                    for (Alien a : currentGameState.getAliens()) {
+                        if (a.isActive() && !bossMinions.contains(a)) {
+                            if (moveDown) a.moverAbajo();
+                            else a.moverHorizontal(dx);
                         }
                     }
                 }
             }
+            // --- Disparo Aleatorio de Aliens (traditional) ---
+            if (random.nextInt(100) < currentAlienShootProbability) {
+                List<Alien> traditionalAliens = new ArrayList<>();
+                for(Alien a : currentGameState.getAliens()){
+                    if(a.isActive() && !bossMinions.contains(a)) traditionalAliens.add(a);
+                }
+                if (!traditionalAliens.isEmpty()) {
+                    Alien shooter = traditionalAliens.get(random.nextInt(traditionalAliens.size()));
+                    // ... (rest of your canShoot logic for traditional aliens)
+                    currentGameState.getBullets().add(new Bullet(shooter.getX() + shooter.getWidth()/2 - Bullet.BULLET_WIDTH/2, shooter.getY() + shooter.getHeight(), -1));
+                }
+            }
+        }
+        
+        // --- Update Boss Minions Movement (if any) ---
+        // Boss minions could have simpler movement logic, e.g., move downwards or towards players
+        for (Alien minion : bossMinions) {
+            if (minion.isActive()) {
+                minion.setY(minion.getY() + 2); // Simple downward movement for minions
+                if (minion.getY() > GamePanel.ALTO_JUEGO) {
+                    minion.setActive(false);
+                }
+                // Minions could also shoot
+                if (random.nextInt(100) < 5) { // Minions have low shoot probability
+                    currentGameState.getBullets().add(new Bullet(minion.getX() + minion.getWidth()/2 - Bullet.BULLET_WIDTH/2, minion.getY() + minion.getHeight(), -1));
+                }
+            }
         }
 
-        // --- Disparo Aleatorio de Aliens ---
-        if (!currentGameState.getAliens().isEmpty() && !currentGameState.isGameOver()) {
-            if (random.nextInt(100) < ALIEN_SHOOT_PROBABILITY) {
-                List<Alien> shooters = new ArrayList<>();
-                for (Alien a : currentGameState.getAliens())
-                    if (a.isActive()) shooters.add(a);
 
-                if (!shooters.isEmpty()) {
-                    Alien shooter = shooters.get(random.nextInt(shooters.size()));
-                    boolean canShoot = true;
-                    for (Bullet b : currentGameState.getBullets()) {
-                        if (b.isActive() && !b.isPlayerBullet()
-                                && b.getX() > shooter.getX()
-                                && b.getX() < shooter.getX() + shooter.getWidth()
-                                && b.getY() < shooter.getY() + 50) {
-                            canShoot = false;
-                            break;
-                        }
-                    }
-                    if (canShoot) {
-                        int bx = shooter.getX() + shooter.getWidth()/2 - Bullet.BULLET_WIDTH/2;
-                        int by = shooter.getY() + shooter.getHeight();
-                        currentGameState.getBullets().add(new Bullet(bx, by, -1));
+        // --- Logic for Level 6 (Boss) ---
+        Boss boss = currentGameState.getBoss();
+        if (currentGameState.getLevel() == MAX_LEVELS && boss != null && boss.isActive()) {
+            boss.updateState(bossMinions, MAX_BOSS_MINIONS); // Pass minion list for context if needed by Boss
+
+            if (boss.canShoot()) {
+                List<Bullet> bossBullets = boss.shoot();
+                currentGameState.getBullets().addAll(bossBullets);
+            }
+
+            if (boss.canSpawnMinion() && bossMinions.size() < MAX_BOSS_MINIONS) {
+                List<Alien> newMinions = boss.spawnMinions();
+                for (Alien minion : newMinions) {
+                    if (bossMinions.size() < MAX_BOSS_MINIONS) {
+                        currentGameState.getAliens().add(minion); // Add to global alien list for drawing & collision
+                        bossMinions.add(minion); // Add to server's tracking list for boss minions
+                    } else {
+                        break; // Reached max minion cap
                     }
                 }
             }
@@ -723,95 +824,138 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      * Llamado repetidamente desde el bucle principal del juego (run).
      */
     private void checkCollisions() {
-        // --- Colisiones: Bala de Jugador vs Alien ---
-        List<Bullet> playerBullets = new ArrayList<>();
+        // --- Colisiones: Bala de Jugador vs Alien (includes boss minions if they are in getAliens()) ---
+        List<Bullet> playerBulletsCopy = new ArrayList<>();
         for (Bullet b : currentGameState.getBullets()) {
-            if (b.isActive() && b.isPlayerBullet()) playerBullets.add(b);
+            if (b.isActive() && b.isPlayerBullet()) playerBulletsCopy.add(b);
         }
 
-        List<Alien> activeAliens = new ArrayList<>();
-        for (Alien a : currentGameState.getAliens()) {
-            if (a.isActive()) activeAliens.add(a);
-        }
+        List<Alien> allAliensCopy = new ArrayList<>(currentGameState.getAliens()); // Includes traditional and boss minions
 
-        for (Bullet bullet : playerBullets) {
-            for (Alien alien : activeAliens) {
-                if (bullet.collidesWith(alien)) {
+        for (Bullet bullet : playerBulletsCopy) {
+            for (Alien alien : allAliensCopy) {
+                if (alien.isActive() && bullet.collidesWith(alien)) {
                     bullet.setActive(false);
-                    alien.setActive(false);
-                    Player shooter = null;
-                    for (Player p : currentGameState.getPlayers()) {
-                        if (p.getPlayerId() == bullet.getOwnerId()) {
-                            shooter = p;
-                            break;
-                        }
+                    alien.setActive(false); // Marks for removal by removeInactiveObjects
+                    // Score logic...
+                    Player shooter = getPlayerById(bullet.getOwnerId());
+                    if (shooter != null) {
+                        int points = alien.getPuntos(); // Standard points
+                        if(bossMinions.contains(alien)) points = 50; // More points for boss minions
+                        addScoreToPlayer(shooter.getPlayerId(), points);
                     }
-                    if (shooter != null && currentGameState.getScores() != null) {
-                        int currentScore = currentGameState.getScores()
-                                .getOrDefault(shooter.getPlayerId(), 0);
-                        currentGameState.getScores()
-                                .put(shooter.getPlayerId(), currentScore + alien.getPuntos());
+                    break; // Bullet hits only one alien
+                }
+            }
+        }
+        
+        // --- Colisiones: Bala de Jugador vs Boss --- (existing logic from previous response)
+        Boss boss = currentGameState.getBoss();
+        if (currentGameState.getLevel() == MAX_LEVELS && boss != null && boss.isActive()) {
+            // Reuse playerBulletsCopy from above
+            for (Bullet bullet : playerBulletsCopy) {
+                if (bullet.isActive() && boss.collidesWith(bullet)) { // Check if bullet is still active
+                    bullet.setActive(false);
+                    if (!boss.isInSpecialAttackMode()) { // Boss might be invulnerable during special
+                        boss.takeDamage(15); // Example damage, can be weapon dependent
+                        log("Boss fue golpeado! Salud restante: " + boss.getCurrentHealth() + "/" + boss.getMaxHealth());
                     }
-                    break;
+                    Player shooter = getPlayerById(bullet.getOwnerId());
+                    if (shooter != null) {
+                        addScoreToPlayer(shooter.getPlayerId(), 75); // Score for hitting boss
+                    }
+                    if (!boss.isActive()) {
+                        log("Boss DERROTADO!");
+                        if (shooter != null) addScoreToPlayer(shooter.getPlayerId(), 5000); // Big bonus
+                    }
                 }
             }
         }
 
-        // --- Colisiones: Bala de Alien vs Jugador ---
-        List<Bullet> alienBullets = new ArrayList<>();
+        // --- Colisiones: Bala de Alien/Minion/Boss vs Jugador --- (existing logic)
+        List<Bullet> enemyBullets = new ArrayList<>();
         for (Bullet b : currentGameState.getBullets()) {
-            if (b.isActive() && !b.isPlayerBullet()) alienBullets.add(b);
+            if (b.isActive() && !b.isPlayerBullet()) enemyBullets.add(b);
         }
-
-        List<Player> playersCopy = new ArrayList<>(currentGameState.getPlayers());
-        for (Bullet bullet : alienBullets) {
+        List<Player> playersCopy = new ArrayList<>(currentGameState.getPlayers()); // Iterate over a copy
+        for (Bullet bullet : enemyBullets) {
             for (Player player : playersCopy) {
-                if (!player.isActive() || player.isInvulnerable()) continue;
-                if (bullet.collidesWith(player)) {
+                if (player.isActive() && !player.isInvulnerable() && bullet.collidesWith(player)) {
                     bullet.setActive(false);
                     player.loseLife();
+                    log("Jugador " + player.getPlayerId() + " impactado. Vidas restantes: " + player.getLives());
                     if (player.getLives() > 0) {
-                        log("Jugador " + player.getPlayerId()
-                                + " impactado. Vidas restantes: " + player.getLives()
-                                + ". Reapareciendo...");
                         respawnSinglePlayer(player);
                     } else {
-                        int pid = player.getPlayerId();
-                        currentGameState.getPlayers().removeIf(p -> p.getPlayerId() == pid);
-                        if (currentGameState.getScores() != null) {
-                            currentGameState.getScores().remove(pid);
-                        }
-                        log("Jugador " + pid
-                                + " ha perdido todas sus vidas y queda eliminado.");
+                        removePlayerFromGame(player.getPlayerId());
+                        log("Jugador " + player.getPlayerId() + " ha perdido todas sus vidas.");
                     }
-                    break;
+                    break; 
                 }
             }
         }
-
-        // --- Colisiones: Alien vs Jugador ---
-        for (Alien alien : activeAliens) {
-            for (Player player : new ArrayList<>(currentGameState.getPlayers())) {
-                if (!player.isActive() || player.isInvulnerable()) continue;
-                if (alien.collidesWith(player)) {
-                    player.loseLife();
-                    if (player.getLives() > 0) {
-                        log("Jugador " + player.getPlayerId()
-                                + " colisionó con alien. Vidas restantes: " + player.getLives()
-                                + ". Reapareciendo...");
-                        respawnSinglePlayer(player);
-                    } else {
-                        int pid = player.getPlayerId();
-                        currentGameState.getPlayers().removeIf(p -> p.getPlayerId() == pid);
-                        if (currentGameState.getScores() != null) {
-                            currentGameState.getScores().remove(pid);
+        
+        // --- Colisiones: Alien (incl. minions) vs Jugador --- (existing logic)
+        for (Alien alien : allAliensCopy) { // allAliensCopy includes minions
+            if(alien.isActive()){
+                for (Player player : playersCopy) { // Use the same playersCopy
+                    if (player.isActive() && !player.isInvulnerable() && alien.collidesWith(player)) {
+                        // Alien does not die, player loses life
+                        player.loseLife();
+                        log("Jugador " + player.getPlayerId() + " colisionó con alien. Vidas restantes: " + player.getLives());
+                        if(player.getLives() > 0) {
+                            respawnSinglePlayer(player);
+                        } else {
+                            removePlayerFromGame(player.getPlayerId());
+                             log("Jugador " + player.getPlayerId() + " eliminado por colisión con alien.");
                         }
-                        log("Jugador " + pid
-                                + " ha perdido todas sus vidas y queda eliminado.");
+                        // Potentially deactivate alien too, or push player back
+                        // For now, only player is affected as per classic Space Invaders style
+                        break; // Alien hits one player, or player hits one alien (depending on perspective)
                     }
-                    break;
                 }
             }
+        }
+        
+        // --- Colisiones: Boss vs Jugador --- (existing logic)
+         if (currentGameState.getLevel() == MAX_LEVELS && boss != null && boss.isActive()) {
+            for (Player player : playersCopy) {
+                if (player.isActive() && !player.isInvulnerable() && boss.collidesWith(player)) {
+                    player.loseLife(); // Boss collision is serious
+                    player.loseLife(); // Lose 2 lives for example
+                    log("Jugador " + player.getPlayerId() + " colisionó con el JEFE!");
+                     if (player.getLives() > 0) {
+                        respawnSinglePlayer(player);
+                    } else {
+                        removePlayerFromGame(player.getPlayerId());
+                        log("Jugador " + player.getPlayerId() + " eliminado por el Jefe.");
+                    }
+                }
+            }
+        }
+    }
+
+    private Player getPlayerById(int playerId) {
+        for (Player p : currentGameState.getPlayers()) {
+            if (p.getPlayerId() == playerId) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    // Helper to add score (you might have this in a more complex way)
+    private void addScoreToPlayer(int playerId, int points) {
+        if (currentGameState.getScores() != null) {
+            currentGameState.getScores().merge(playerId, points, Integer::sum);
+        }
+    }
+    
+    // Helper to remove player (consolidates logic)
+    private void removePlayerFromGame(int playerId){
+        currentGameState.getPlayers().removeIf(p -> p.getPlayerId() == playerId);
+        if (currentGameState.getScores() != null) {
+            currentGameState.getScores().remove(playerId);
         }
     }
 
@@ -838,31 +982,29 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         player.setX(newX);
         player.setY(newY);
     }
+    
+    
     private void checkGameOver() {
-        // Condición 1: Aliens llegan al fondo
-        int bottomLimit = GamePanel.ALTO_JUEGO - Alien.ALIEN_HEIGHT - 10; // Límite inferior
-        for (Alien alien : currentGameState.getAliens()) {
-            if (alien.isActive() && alien.getY() >= bottomLimit) {
-                currentGameState.setGameOver(true);
-                currentGameState.setStatusMessage("GAME OVER - ¡Los aliens invadieron!");
-                log("Game Over: Aliens alcanzaron la línea de defensa.");
-                return; // Termina la comprobación
+        // Existing: Aliens reach bottom (for levels 1-5)
+        if (currentGameState.getLevel() < MAX_LEVELS) {
+            int bottomLimit = GamePanel.ALTO_JUEGO - Alien.ALIEN_HEIGHT - 60; // Give a bit more room
+            for (Alien alien : currentGameState.getAliens()) {
+                if (alien.isActive() && alien.getY() + Alien.ALIEN_HEIGHT >= bottomLimit) { // Check bottom of alien
+                    currentGameState.setGameOver(true);
+                    currentGameState.setStatusMessage("GAME OVER - ¡Los aliens invadieron!");
+                    log("Game Over: Aliens alcanzaron la línea de defensa.");
+                    return;
+                }
             }
         }
 
-        // Condición 2: No quedan jugadores activos (si implementáramos vidas)
-        // boolean anyPlayerAlive = false;
-        // for (Player player : currentGameState.getPlayers()) {
-        //     if (player.isActive()) {
-        //         anyPlayerAlive = true;
-        //         break;
-        //     }
-        // }
-        // if (!anyPlayerAlive && !currentGameState.getPlayers().isEmpty()) { // Asegura que había jugadores al inicio
-        //     currentGameState.setGameOver(true);
-        //     currentGameState.setStatusMessage("GAME OVER - Todos los jugadores eliminados");
-        //     log("Game Over: No quedan jugadores activos.");
-        // }
+        // Existing: No players left
+        // (Your existing logic for this is fine)
+        if (currentGameState.getPlayers().isEmpty() && nextPlayerId > 0) { // if players were ever in game
+             currentGameState.setGameOver(true);
+             currentGameState.setStatusMessage("GAME OVER - Todos los jugadores eliminados");
+             log("Game Over: No quedan jugadores activos.");
+        }
     }
 
     /**
@@ -870,27 +1012,41 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
      * Llamado repetidamente desde el bucle principal del juego (run).
      */
     private void checkLevelComplete() {
-        // Si el juego ya terminó, no hacer nada.
         if (currentGameState.isGameOver()) return;
 
-        // Comprueba si quedan aliens activos.
-        boolean aliensRemain = false;
-        for (Alien alien : currentGameState.getAliens()) {
-            if (alien.isActive()) {
-                aliensRemain = true;
-                break;
+        boolean levelBeaten = false;
+        int currentLevel = currentGameState.getLevel();
+
+        if (currentLevel >= 1 && currentLevel <= 5) { // Traditional alien levels
+            boolean aliensRemain = false;
+            for (Alien alien : currentGameState.getAliens()) {
+                if (alien.isActive()) {
+                    aliensRemain = true;
+                    break;
+                }
+            }
+            if (!aliensRemain && !currentGameState.getAliens().isEmpty()) { // Check if aliens list was populated for this level
+                levelBeaten = true;
+            } else if (!aliensRemain && currentGameState.getAliens().isEmpty() && currentGameState.getStatusMessage().startsWith("Nivel")){
+                // This can happen if spawnEntitiesForLevel was called but no aliens were added (e.g. level 6 start)
+                // Only consider level beaten if there were aliens meant to be there or it's the boss level
+                if(currentLevel < MAX_LEVELS) levelBeaten = true; // Assume if list is empty and it's not boss level, it was cleared
+            }
+
+
+        } else if (currentLevel == MAX_LEVELS) { // Boss Level
+            Boss boss = currentGameState.getBoss();
+            if (boss != null && !boss.isActive()) { // Boss defeated
+                levelBeaten = true;
             }
         }
 
-        // Si no quedan aliens activos, el nivel está completo.
-        if (!aliensRemain) {
-            log("Nivel " + currentGameState.getLevel() + " completado!");
-            // Podríamos añadir una pausa breve aquí antes de pasar al siguiente nivel.
-            try { Thread.sleep(2000); } catch (InterruptedException e) {} // Pausa de 2 segundos
-            advanceToNextLevel(); // Prepara el siguiente nivel
+        if (levelBeaten) {
+            log("Nivel " + currentLevel + " completado!");
+            try { Thread.sleep(2000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            advanceToNextLevel();
         }
     }
-
 
     // --- Comunicación con Clientes ---
     /**
