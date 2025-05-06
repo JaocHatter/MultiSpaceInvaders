@@ -875,31 +875,33 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         player.setX(newX);
         player.setY(newY);
     }
+
     private void checkGameOver() {
-        // Condición 1: Aliens llegan al fondo
-        int bottomLimit = GamePanel.ALTO_JUEGO - Alien.ALIEN_HEIGHT - 10; // Límite inferior
-        for (Alien alien : currentGameState.getAliens()) {
-            if (alien.isActive() && alien.getY() >= bottomLimit) {
-                currentGameState.setGameOver(true);
-                currentGameState.setStatusMessage("GAME OVER - ¡Los aliens invadieron!");
-                log("Game Over: Aliens alcanzaron la línea de defensa.");
-                return; // Termina la comprobación
+        // 1. Verifica si el juego ya está marcado como terminado
+        if (currentGameState.isGameOver()) return;
+
+        // 2. Verifica si todos los jugadores han sido eliminados (ninguno activo)
+        boolean anyAlive = currentGameState.getPlayers().stream()
+                .anyMatch(Player::isActive);
+
+        if (!anyAlive) {
+            // 3. Marcar juego como terminado
+            currentGameState.setGameOver(true);
+            currentGameState.setStatusMessage("GAME OVER - Todos los jugadores fueron eliminados.");
+            log("Game Over: No quedan jugadores con vidas.");
+
+            // 4. Guardar puntuaciones finales de los jugadores que aún estaban activos
+            for (Player p : currentGameState.getPlayers()) {
+                int pid = p.getPlayerId();
+                int score = currentGameState.getScores().getOrDefault(pid, 0);
+                finalScores.putIfAbsent(pid, score);
             }
+
+            // 5. Mostrar tabla ordenada en la GUI del servidor
+            SwingUtilities.invokeLater(this::showFinalScoresTable);
         }
 
-        // Condición 2: No quedan jugadores activos (si implementáramos vidas)
-        // boolean anyPlayerAlive = false;
-        // for (Player player : currentGameState.getPlayers()) {
-        //     if (player.isActive()) {
-        //         anyPlayerAlive = true;
-        //         break;
-        //     }
-        // }
-        // if (!anyPlayerAlive && !currentGameState.getPlayers().isEmpty()) { // Asegura que había jugadores al inicio
-        //     currentGameState.setGameOver(true);
-        //     currentGameState.setStatusMessage("GAME OVER - Todos los jugadores eliminados");
-        //     log("Game Over: No quedan jugadores activos.");
-        // }
+        // (opcional) podrías agregar otras condiciones de victoria aquí si las tuvieras
     }
 
     /**
