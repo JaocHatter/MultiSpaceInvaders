@@ -1,19 +1,17 @@
 package com.dirac.spaceinvaders.game;
 
-// package com.dirac.spaceinvaders.game; // Keep your package
-
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public class GameState implements Serializable {
-    private static final long serialVersionUID = 2L; // Increment version ID due to new field
+    private static final long serialVersionUID = 2L;
 
     private List<Player> players;
     private List<Alien> aliens;
     private List<Bullet> bullets;
-    private Boss boss; // New field for the boss
+    private Boss boss;
 
     private int level;
     private Map<Integer, Integer> scores;
@@ -24,13 +22,12 @@ public class GameState implements Serializable {
         this.players = new ArrayList<>();
         this.aliens = new ArrayList<>();
         this.bullets = new ArrayList<>();
-        this.boss = null; // Initialize boss as null
+        this.boss = null;
         this.level = 1;
         this.gameOver = false;
         this.statusMessage = "Esperando jugadores...";
     }
 
-    // Getters
     public List<Player> getPlayers() { return players; }
     public List<Alien> getAliens() { return aliens; }
     public List<Bullet> getBullets() { return bullets; }
@@ -61,8 +58,6 @@ public class GameState implements Serializable {
                 aliens.remove(i);
             }
         }
-        // Check if boss is inactive (defeated) and handle if necessary
-        // (e.g., set to null, though Servidor might handle this by not re-adding)
-        // For now, Boss active state is checked before drawing/updating.
+
     }
 }

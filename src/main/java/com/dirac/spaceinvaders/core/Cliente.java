@@ -1,63 +1,49 @@
 package com.dirac.spaceinvaders.core;
 
-import com.dirac.spaceinvaders.game.GamePanel;   // Panel de dibujo
-import com.dirac.spaceinvaders.game.GameState;  // Objeto de estado
-import com.dirac.spaceinvaders.net.MessageAction; // Acciones a enviar
-import javax.swing.Timer;  // Necesario para movimiento continuo
+import com.dirac.spaceinvaders.game.GamePanel;
+import com.dirac.spaceinvaders.game.GameState;
+import com.dirac.spaceinvaders.net.MessageAction;
+import javax.swing.Timer;
 
-import javax.swing.*; // GUI
-import java.awt.*;    // Layouts, Dimension, etc.
-import java.awt.event.*; // Listeners (ActionListener, KeyAdapter)
-import java.io.IOException; // Excepciones de red
-import java.io.ObjectInputStream; // Leer estado del servidor
-import java.io.ObjectOutputStream; // Enviar acciones al servidor
-import java.net.ConnectException; // Error específico de conexión
-import java.net.Socket;           // Socket del cliente
-import java.net.SocketException;  // Error de socket
-import java.net.UnknownHostException; // Host no encontrado
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.ConnectException;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 
-/**
- * Clase Cliente: Representa la aplicación cliente que se conecta al servidor
- * de Space Invaders, muestra el juego y envía las acciones del usuario.
- */
-public class Cliente implements Runnable { // Runnable para el hilo de escucha del servidor
 
-    // --- Constantes ---
-    private static final String DEFAULT_SERVER_IP = "127.0.0.1"; // IP por defecto (localhost)
-    private static final int DEFAULT_SERVER_PORT = 12345;      // Puerto por defecto
+public class Cliente implements Runnable {
 
-    // --- Componentes de Red ---
-    private String serverIp;             // IP del servidor al que conectar
-    private int serverPort;              // Puerto del servidor
-    private Socket socket;               // Socket para la conexión con el servidor
-    private ObjectOutputStream outputStream; // Stream para enviar acciones (MessageAction)
-    private ObjectInputStream inputStream;  // Stream para recibir estado (GameState)
-    private volatile boolean connected = false; // Indica si estamos conectados
-    private volatile boolean listening = false; // Controla el hilo de escucha
-    private int myPlayerId = -1; // ID asignado por el servidor
+    private static final String DEFAULT_SERVER_IP = "127.0.0.1";
+    private static final int DEFAULT_SERVER_PORT = 12345;
 
-    // --- Componentes de la GUI ---
-    private JFrame clientFrame;    // Ventana principal
-    private JTextField ipField;      // Campo para IP del servidor
-    private JTextField portField;    // Campo para Puerto del servidor
-    private JButton connectButton;  // Botón Conectar/Desconectar
-    private GamePanel gamePanel;    // Panel donde se dibuja el juego
-    // Podríamos añadir botones para controles como en el PDF, pero KeyListener es más común para juegos
-    // private JButton leftButton, rightButton, fireButton;
+    private String serverIp;
+    private int serverPort;
+    private Socket socket;
+    private ObjectOutputStream outputStream;
+    private ObjectInputStream inputStream;
+    private volatile boolean connected = false;
+    private volatile boolean listening = false;
+    private int myPlayerId = -1;
 
-    // --- Control ---
-    // Banderas para saber qué tecla de movimiento está presionada. 'volatile' por acceso multihilo.
+    private JFrame clientFrame;
+    private JTextField ipField;
+    private JTextField portField;
+    private JButton connectButton;
+    private GamePanel gamePanel;
+
     private volatile boolean movingLeft = false;
     private volatile boolean movingRight = false;
-    private boolean movingUp = false;     // ← Agregar esto
-    private boolean movingDown = false;   // ← Y esto también
+    private boolean movingUp = false;
+    private boolean movingDown = false;
 
-    // Timer para movimiento continuo
     private Timer movementTimer;
-    // --- Constructor ---
-    /**
-     * Constructor del Cliente. Inicializa la GUI.
-     */
+
     public Cliente() {
         setupGUI();
         initMovementTimer();
@@ -74,17 +60,12 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
         });
         movementTimer.start();
     }
-    // --- Configuración de la GUI ---
-    /**
-     * Configura la interfaz gráfica de usuario (GUI) del cliente.
-     */
+
     private void setupGUI() {
-        // Ventana principal
         clientFrame = new JFrame("Cliente Space Invaders");
         clientFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         clientFrame.setLayout(new BorderLayout(5, 5));
 
-        // --- Panel Superior: Conexión ---
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         topPanel.add(new JLabel("IP Servidor:"));
         ipField = new JTextField(DEFAULT_SERVER_IP, 15);
@@ -97,16 +78,12 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
         topPanel.add(connectButton);
         clientFrame.add(topPanel, BorderLayout.NORTH);
 
-        // --- Panel Central: Juego ---
         gamePanel = new GamePanel();
         clientFrame.add(gamePanel, BorderLayout.CENTER);
 
-        // --- KeyListener en gamePanel ---
-        // 1) Permitimos que el panel reciba foco
+
         gamePanel.setFocusable(true);
-        // 2) Evitamos que las flechas cambien el foco de componente
         gamePanel.setFocusTraversalKeysEnabled(false);
-        // 3) Añadimos el listener
         gamePanel.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -119,44 +96,35 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
             }
         });
 
-        // --- Mostrar ventana y solicitar foco ---
         clientFrame.pack();
         clientFrame.setLocationRelativeTo(null);
         clientFrame.setVisible(true);
 
-        // Pedir foco al gamePanel para que reciba las teclas inmediatamente
         gamePanel.requestFocusInWindow();
     }
 
 
-    // --- Manejo de Conexión ---
-    /**
-     * Intenta conectar o desconectar del servidor. Llamado por el botón.
-     */
+
     private void toggleConnection() {
         if (!connected) {
-            // Conectar
             try {
                 serverIp = ipField.getText();
                 serverPort = Integer.parseInt(portField.getText());
                 if (serverPort < 1024 || serverPort > 65535) throw new NumberFormatException("Puerto inválido");
 
-                // Intenta establecer la conexión. El constructor de Socket puede bloquear.
-                // Hacemos esto en un hilo separado para no congelar la GUI.
                 setStatus("Conectando a " + serverIp + ":" + serverPort + "...");
-                connectButton.setEnabled(false); // Deshabilita botón mientras conecta
+                connectButton.setEnabled(false);
 
                 new Thread(() -> {
                     try {
                         socket = new Socket(serverIp, serverPort); // Intenta conectar
 
-                        // Si la conexión tiene éxito:
+                        // Si la conexion tiene éxito:
                         outputStream = new ObjectOutputStream(socket.getOutputStream());
                         inputStream = new ObjectInputStream(socket.getInputStream());
                         connected = true;
                         listening = true; // Activa bandera para el hilo de escucha
 
-                        // Lee el ID asignado por el servidor (espera el formato "ID:X")
                         Object idMessage = inputStream.readObject();
                         if (idMessage instanceof String && ((String)idMessage).startsWith("ID:")) {
                              try {
@@ -166,7 +134,7 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
                              } catch (NumberFormatException nfe) {
                                  System.err.println("Error parseando ID del servidor: " + idMessage);
                                  setStatus("Error: ID inválido recibido.");
-                                 disconnect(); // Desconecta si el ID es incorrecto
+                                 disconnect();
                                  return;
                              }
                         } else {
@@ -176,11 +144,8 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
                              return;
                         }
 
-
-                        // Inicia el hilo que escucha los GameState del servidor.
                         new Thread(this).start();
 
-                        // Habilita/deshabilita controles en el hilo de Swing
                         SwingUtilities.invokeLater(() -> {
                             connectButton.setText("Desconectar");
                             connectButton.setEnabled(true);
@@ -202,13 +167,12 @@ public class Cliente implements Runnable { // Runnable para el hilo de escucha d
                          resetConnectionUI();
                          disconnect(); // Intenta limpiar si algo se creó
                     }
-                }).start(); // Inicia el hilo de conexión
+                }).start();
 
             } catch (NumberFormatException nfe) {
                 showError("Puerto inválido. Introduce un número entre 1024 y 65535.");
             }
         } else {
-            // Desconectar
             disconnect();
         }
     }
