@@ -1,0 +1,6 @@
+{
+    "java.project.sourcePaths": [
+        "src/main/java" // Asegúrate de que esta línea esté presente
+    ]
+    // Puede haber otras configuraciones aquí, déjalas como están.
+}
