@@ -2,14 +2,14 @@ package com.dirac.spaceinvaders.game;
 
 import java.awt.Color; // Para el color
 import java.awt.Graphics; // Para dibujar
-import java.io.Serializable; // Necesario para enviar por red
+// import java.io.Serializable; // Necesario para enviar por red
 
 /**
  * Clase Alien: Representa una nave enemiga (invasor).
  * Hereda de GameObject y añade tipo (para puntuación/apariencia) y velocidad.
  * Es Serializable para ser incluida en GameState.
  */
-public class Alien extends GameObject implements Serializable {
+public class Alien extends GameObject {
     private static final long serialVersionUID = 1L; // Versión para serialización
 
     // --- Constantes ---
@@ -26,7 +26,7 @@ public class Alien extends GameObject implements Serializable {
     // --- Atributos Específicos del Alien ---
     private int tipo; // Tipo de alien (0, 1, o 2)
     private int puntos; // Puntos que otorga al ser destruido
-    private Color color; // Color según el tipo
+    private final Color color; // Color según el tipo
 
     // --- Constructor ---
     /**
