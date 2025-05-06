@@ -729,7 +729,9 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         // --- Colisiones: Bala de Jugador vs Alien ---
         List<Bullet> playerBullets = new ArrayList<>();
         for (Bullet b : currentGameState.getBullets()) {
-            if (b.isActive() && b.isPlayerBullet()) playerBullets.add(b);
+            if (b.isActive() && b.isPlayerBullet()) {
+                playerBullets.add(b);
+            }
         }
 
         List<Alien> activeAliens = new ArrayList<>();
@@ -742,6 +744,7 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
                 if (bullet.collidesWith(alien)) {
                     bullet.setActive(false);
                     alien.setActive(false);
+
                     Player shooter = null;
                     for (Player p : currentGameState.getPlayers()) {
                         if (p.getPlayerId() == bullet.getOwnerId()) {
@@ -749,6 +752,7 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
                             break;
                         }
                     }
+
                     if (shooter != null && currentGameState.getScores() != null) {
                         int currentScore = currentGameState.getScores()
                                 .getOrDefault(shooter.getPlayerId(), 0);
@@ -763,16 +767,21 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         // --- Colisiones: Bala de Alien vs Jugador ---
         List<Bullet> alienBullets = new ArrayList<>();
         for (Bullet b : currentGameState.getBullets()) {
-            if (b.isActive() && !b.isPlayerBullet()) alienBullets.add(b);
+            if (b.isActive() && !b.isPlayerBullet()) {
+                alienBullets.add(b);
+            }
         }
 
         List<Player> playersCopy = new ArrayList<>(currentGameState.getPlayers());
+
         for (Bullet bullet : alienBullets) {
             for (Player player : playersCopy) {
                 if (!player.isActive() || player.isInvulnerable()) continue;
+
                 if (bullet.collidesWith(player)) {
                     bullet.setActive(false);
                     player.loseLife();
+
                     if (player.getLives() > 0) {
                         log("Jugador " + player.getPlayerId()
                                 + " impactado. Vidas restantes: " + player.getLives()
@@ -780,12 +789,10 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
                         respawnSinglePlayer(player);
                     } else {
                         int pid = player.getPlayerId();
+                        finalScores.put(pid, currentGameState.getScores().getOrDefault(pid, 0));
                         currentGameState.getPlayers().removeIf(p -> p.getPlayerId() == pid);
-                        if (currentGameState.getScores() != null) {
-                            currentGameState.getScores().remove(pid);
-                        }
-                        log("Jugador " + pid
-                                + " ha perdido todas sus vidas y queda eliminado.");
+                        currentGameState.getScores().remove(pid);
+                        log("Jugador " + pid + " ha perdido todas sus vidas y queda eliminado.");
                     }
                     break;
                 }
@@ -796,8 +803,10 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
         for (Alien alien : activeAliens) {
             for (Player player : new ArrayList<>(currentGameState.getPlayers())) {
                 if (!player.isActive() || player.isInvulnerable()) continue;
+
                 if (alien.collidesWith(player)) {
                     player.loseLife();
+
                     if (player.getLives() > 0) {
                         log("Jugador " + player.getPlayerId()
                                 + " colisionó con alien. Vidas restantes: " + player.getLives()
@@ -805,12 +814,10 @@ public class Servidor implements Runnable { // Implementa Runnable para el bucle
                         respawnSinglePlayer(player);
                     } else {
                         int pid = player.getPlayerId();
+                        finalScores.put(pid, currentGameState.getScores().getOrDefault(pid, 0));
                         currentGameState.getPlayers().removeIf(p -> p.getPlayerId() == pid);
-                        if (currentGameState.getScores() != null) {
-                            currentGameState.getScores().remove(pid);
-                        }
-                        log("Jugador " + pid
-                                + " ha perdido todas sus vidas y queda eliminado.");
+                        currentGameState.getScores().remove(pid);
+                        log("Jugador " + pid + " ha perdido todas sus vidas y queda eliminado.");
                     }
                     break;
                 }
