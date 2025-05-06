@@ -2,14 +2,14 @@ package com.dirac.spaceinvaders.game;
 
 import java.awt.Color; // Para el color de la nave
 import java.awt.Graphics; // Para dibujar
-import java.io.Serializable; // Necesario para enviar por red
+// import java.io.Serializable; // Necesario para enviar por red
 
 /**
  * Clase Player: Representa la nave controlada por un jugador.
  * Hereda de GameObject y añade un ID único y una puntuación.
  * Es Serializable para ser incluida en GameState.
  */
-public class Player extends GameObject implements Serializable {
+public class Player extends GameObject {
     private static final long serialVersionUID = 1L; // Versión para serialización
 
     // --- Constantes ---
@@ -19,12 +19,12 @@ public class Player extends GameObject implements Serializable {
     public static final int INITIAL_LIVES = 3; // ← número de vidas iniciales
 
     // --- Atributos Específicos del Jugador ---
-    private int playerId; // Identificador único para este jugador
+    private final int playerId; // Identificador único para este jugador
     private int score;    // Puntuación actual del jugador
     private int lives;    // ← nueva variable de vidas
     private long respawnTimestamp = 0L;              // instante en que reapareció
     private static final long INVULNERABILITY_MS = 2000; // 2 segundos
-    private Color color;  // Color para distinguir naves (opcional)
+    private final Color color;  // Color para distinguir naves (opcional)
 
     // --- Constructor ---
     /**
