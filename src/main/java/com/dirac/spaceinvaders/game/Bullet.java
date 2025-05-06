@@ -2,14 +2,14 @@ package com.dirac.spaceinvaders.game;
 
 import java.awt.Color; // Para el color
 import java.awt.Graphics; // Para dibujar
-import java.io.Serializable; // Necesario para enviar por red
+// import java.io.Serializable; // Necesario para enviar por red
 
 /**
  * Clase Bullet: Representa un proyectil disparado por un jugador o un alien.
  * Hereda de GameObject y añade información sobre quién lo disparó y su velocidad/dirección.
  * Es Serializable para ser incluida en GameState.
  */
-public class Bullet extends GameObject implements Serializable {
+public class Bullet extends GameObject {
     private static final long serialVersionUID = 1L; // Versión para serialización
 
     // --- Constantes ---
@@ -19,9 +19,9 @@ public class Bullet extends GameObject implements Serializable {
     public static final int ALIEN_BULLET_SPEED = 5;  // Velocidad hacia abajo (positiva en Y)
 
     // --- Atributos Específicos de la Bala ---
-    private int ownerId; // ID del jugador que disparó (-1 si es de un alien)
-    private int speedY;  // Velocidad vertical (negativa para jugador, positiva para alien)
-    private Color color; // Color de la bala
+    private final int ownerId; // ID del jugador que disparó (-1 si es de un alien)
+    private final int speedY;  // Velocidad vertical (negativa para jugador, positiva para alien)
+    private final Color color; // Color de la bala
 
     // --- Constructor ---
     /**
